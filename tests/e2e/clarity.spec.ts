@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
+import { setKnob } from './controls';
 
-const artifacts = '.codex-runs/20261028-144635-m1-sequencer/artifacts-3';
+const artifacts = '.codex-runs/20261028-144635-m1-sequencer/artifacts-4';
 
 test('all tracks have at least 3:1 off/on contrast and three distinct velocity treatments', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -74,16 +75,16 @@ test('track selection changes only the editor and selected mixer values survive 
   await expect(page.locator('#selected-track-name')).toHaveText('军鼓');
   await expect(page.locator('#audio-hint')).toHaveText('声音已就绪');
   expect(await page.locator('.step').evaluateAll(cells => cells.map(cell => cell.getAttribute('data-velocity')))).toEqual(steps);
-  await page.getByLabel('军鼓音量').fill('67');
-  await page.getByLabel('军鼓响弦').fill('81');
+  await setKnob(page, '军鼓音量', 67);
+  await setKnob(page, '军鼓响弦', 81);
   await page.reload();
   await expect(page.locator('#selected-track-name')).toHaveText('底鼓');
-  await expect(page.getByLabel('底鼓音量')).toHaveValue('80');
+  await expect(page.getByRole('slider', { name: '底鼓音量' })).toHaveAttribute('aria-valuenow', '80');
   await snare.focus();
   await page.keyboard.press('Enter');
   await expect(page.locator('#selected-track-name')).toHaveText('军鼓');
-  await expect(page.getByLabel('军鼓音量')).toHaveValue('67');
-  await expect(page.getByLabel('军鼓响弦')).toHaveValue('81');
+  await expect(page.getByRole('slider', { name: '军鼓音量' })).toHaveAttribute('aria-valuenow', '67');
+  await expect(page.getByRole('slider', { name: '军鼓响弦' })).toHaveAttribute('aria-valuenow', '81');
   expect(await page.locator('.step').evaluateAll(cells => cells.map(cell => cell.getAttribute('data-velocity')))).toEqual(steps);
 });
 
@@ -134,6 +135,8 @@ for (const stepsPerBar of [12, 24]) {
     }, { steps: stepsPerBar });
     await page.reload();
     await expect(page.locator('.step')).toHaveCount(8 * stepsPerBar);
+    await expect(page.locator('.transport-led')).toHaveCount(stepsPerBar);
+    await expect(page.locator('.transport-led.is-lit')).toHaveCount(0);
     for (let group = 0; group < 4; group++) await expect(page.locator(`.step-heading.group-${group}`)).toHaveCount(stepsPerBar / 4);
     const beats = await page.locator('.step[data-track="BD"].is-beat').evaluateAll(cells => cells.map(cell => Number(cell.getAttribute('data-step'))));
     expect(beats).toEqual([0, stepsPerBar / 4, stepsPerBar / 2, stepsPerBar * 3 / 4]);

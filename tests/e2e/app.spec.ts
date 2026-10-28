@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
+import { setKnob } from './controls';
 
-const artifacts = '.codex-runs/20261028-144635-m1-sequencer/artifacts-3';
+const artifacts = '.codex-runs/20261028-144635-m1-sequencer/artifacts-4';
 
 test('desktop editing, transport, controls, persistence and screenshots', async ({ page }) => {
   const errors: string[] = [];
@@ -41,14 +42,14 @@ test('desktop editing, transport, controls, persistence and screenshots', async 
   await expect(page.locator('.is-current')).toHaveCount(0);
   await page.getByLabel('BPM 数值').fill('146');
   await page.getByLabel('BPM 数值').press('Tab');
-  await expect(page.getByLabel('BPM', { exact: true })).toHaveValue('146');
-  await page.getByLabel('Swing', { exact: true }).fill('69');
+  await expect(page.getByRole('slider', { name: 'BPM', exact: true })).toHaveAttribute('aria-valuenow', '146');
+  await setKnob(page, 'Swing', 69);
   await expect(page.locator('#swing-value')).toHaveText('69');
   await page.getByLabel('底鼓静音').click();
   await page.getByLabel('军鼓独奏').click();
   await page.getByRole('button', { name: '开镲，选择并试听' }).click();
-  await page.getByLabel('开镲衰减').fill('73');
-  await page.getByLabel('主音量', { exact: true }).fill('61');
+  await setKnob(page, '开镲衰减', 73);
+  await setKnob(page, '主音量', 61);
   await page.reload();
   await expect(cell).toHaveAttribute('data-velocity', '1');
   await expect(page.getByLabel('BPM 数值')).toHaveValue('146');
@@ -56,8 +57,8 @@ test('desktop editing, transport, controls, persistence and screenshots', async 
   await expect(page.getByLabel('底鼓静音')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByLabel('军鼓独奏')).toHaveAttribute('aria-pressed', 'true');
   await page.getByRole('button', { name: '开镲，选择并试听' }).click();
-  await expect(page.getByLabel('开镲衰减')).toHaveValue('73');
-  await expect(page.getByLabel('主音量', { exact: true })).toHaveValue('61');
+  await expect(page.getByRole('slider', { name: '开镲衰减' })).toHaveAttribute('aria-valuenow', '73');
+  await expect(page.getByRole('slider', { name: '主音量', exact: true })).toHaveAttribute('aria-valuenow', '61');
   // Space on the page toggles; focused inputs retain their normal keyboard behavior.
   await page.locator('h1').click();
   await page.keyboard.press('Space');
