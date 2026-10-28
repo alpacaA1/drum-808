@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-const artifacts = '.codex-runs/20261028-144635-m1-sequencer/artifacts-2';
+const artifacts = '.codex-runs/20261028-144635-m1-sequencer/artifacts-3';
 
 test('desktop editing, transport, controls, persistence and screenshots', async ({ page }) => {
   const errors: string[] = [];
@@ -37,7 +37,6 @@ test('desktop editing, transport, controls, persistence and screenshots', async 
   await page.waitForTimeout(1000);
   const later = await page.locator('.step-heading.is-current').getAttribute('data-head');
   expect(later).not.toBe(initial);
-  await page.screenshot({ path: `${artifacts}/desktop-playing.png` });
   await page.getByRole('button', { name: '停止', exact: true }).click();
   await expect(page.locator('.is-current')).toHaveCount(0);
   await page.getByLabel('BPM 数值').fill('146');
@@ -47,6 +46,7 @@ test('desktop editing, transport, controls, persistence and screenshots', async 
   await expect(page.locator('#swing-value')).toHaveText('69');
   await page.getByLabel('底鼓静音').click();
   await page.getByLabel('军鼓独奏').click();
+  await page.getByRole('button', { name: '开镲，选择并试听' }).click();
   await page.getByLabel('开镲衰减').fill('73');
   await page.getByLabel('主音量', { exact: true }).fill('61');
   await page.reload();
@@ -55,6 +55,7 @@ test('desktop editing, transport, controls, persistence and screenshots', async 
   await expect(page.locator('#swing-value')).toHaveText('69');
   await expect(page.getByLabel('底鼓静音')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByLabel('军鼓独奏')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: '开镲，选择并试听' }).click();
   await expect(page.getByLabel('开镲衰减')).toHaveValue('73');
   await expect(page.getByLabel('主音量', { exact: true })).toHaveValue('61');
   // Space on the page toggles; focused inputs retain their normal keyboard behavior.
@@ -67,6 +68,14 @@ test('desktop editing, transport, controls, persistence and screenshots', async 
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('Tab');
   await expect(page.getByLabel('BPM 数值')).toHaveValue('147');
+  await page.getByLabel('底鼓静音').click();
+  await page.getByLabel('军鼓独奏').click();
+  await page.locator('#preset').selectOption('jazz');
+  await page.getByRole('button', { name: '播放', exact: true }).click();
+  await expect(page.locator('.step-heading.is-current')).toHaveCount(1);
+  await expect.poll(async () => Number(await page.locator('.step-heading.is-current').getAttribute('data-head'))).toBeGreaterThan(1);
+  await page.screenshot({ path: `${artifacts}/desktop-playing.png` });
+  await page.getByRole('button', { name: '停止', exact: true }).click();
   expect(errors).toEqual([]);
 });
 
@@ -76,6 +85,8 @@ test('phone keeps usable step targets and sticky track names after horizontal sc
   await page.goto('/');
   await page.waitForLoadState('networkidle');
   await page.locator('#preset').selectOption('jazz');
+  await page.evaluate(() => scrollTo(0, 0));
+  await page.screenshot({ path: `${artifacts}/phone-top.png` });
   const track = page.locator('[data-track-panel="BD"]');
   const initialX = (await track.boundingBox())!.x;
   const cell = page.locator('.step[data-track="BD"][data-step="1"]');

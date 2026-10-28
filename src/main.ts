@@ -77,6 +77,10 @@ async function transport(): Promise<void> {
 
 const panel = new Panel(document.querySelector<HTMLElement>('#app')!, state, {
   transport: () => { void transport(); },
+  audition: id => {
+    const shouldAudition = !playing;
+    void unlock().then(ready => { if (ready && shouldAudition && !playing) engine.trigger(id, engine.currentTime + 0.005, 2); });
+  },
   edit: (id, step, mode, value) => {
     const level = mode === 'cycle' ? cycleVelocity(state.pattern, id, step) : mode === 'toggle' ? toggleStep(state.pattern, id, step) : value!;
     if (mode === 'paint') setVelocity(state.pattern, id, step, level);

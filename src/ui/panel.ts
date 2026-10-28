@@ -2,6 +2,7 @@ import { PRESETS, TRACKS, type Session, type TrackId, type Velocity } from '../s
 
 export interface PanelActions {
   transport: () => void;
+  audition: (id: TrackId) => void;
   edit: (id: TrackId, step: number, mode: 'toggle' | 'cycle' | 'paint', value?: Velocity) => Velocity;
   timing: (key: 'bpm' | 'swing', value: number) => void;
   mix: (id: TrackId, key: 'mute' | 'solo' | 'volume' | 'tone', value: boolean | number) => void;
@@ -16,28 +17,35 @@ const toneNames: Partial<Record<TrackId, string>> = { BD: '衰减', SD: '响弦'
 export class Panel {
   private cells = new Map<string, HTMLButtonElement>();
   private playhead = -1;
+  private selectedTrack: TrackId = 'BD';
 
   constructor(private root: HTMLElement, private state: Session, private actions: PanelActions) {
     root.innerHTML = `
       <a class="skip-link" href="#sequencer">跳到步进音序器</a>
       <main class="studio">
-        <div class="studio-caption"><span><i></i> 节奏实验室</span><span>第一章 / 让节奏发生</span></div>
         <section class="machine" aria-label="Drum 808 鼓机">
-          <header class="brand-row">
+          <header class="top-bar" aria-label="播放控制">
             <div class="brand"><h1>Drum <span>808</span></h1><p>浏览器里的节奏机</p></div>
-            <div class="brand-note"><span class="colour-stripes"><i></i><i></i><i></i><i></i></span><span>八种鼓声，一段你的律动。<br>实时合成 · 无采样</span></div>
+            <div class="transport-group"><button id="transport" class="transport" aria-label="播放" aria-pressed="false"><span id="transport-icon">▶</span><span id="transport-label">播放</span><kbd>空格</kbd></button></div>
+            <div class="timing-control tempo"><div class="control-readout"><label class="section-label" for="bpm-number">BPM</label><input id="bpm-number" type="number" min="60" max="200" step="1" aria-label="BPM 数值"></div><input id="bpm" aria-label="BPM" type="range" min="60" max="200" step="1"></div>
+            <div class="timing-control swing"><div class="control-readout"><label class="section-label" for="swing">Swing</label><div><output id="swing-value" for="swing"></output><span class="readout-unit">%</span></div></div><input id="swing" aria-label="Swing" type="range" min="50" max="75" step="1"></div>
+            <div class="master-control"><div class="control-readout"><label class="section-label" for="master">主音量</label><output id="master-value" for="master"></output></div><input id="master" aria-label="主音量" type="range" min="0" max="100" step="1"></div>
           </header>
-          <section class="controls" aria-label="播放控制">
-            <div class="transport-group"><span class="section-label">开始你的律动</span><button id="transport" class="transport" aria-label="播放" aria-pressed="false"><span id="transport-icon">▶</span><span id="transport-label">播放</span><kbd>空格</kbd></button></div>
-            <div class="timing-control tempo"><label class="section-label" for="bpm-number">速度 <span>BPM</span></label><div class="readout-line"><input id="bpm-number" type="number" min="60" max="200" step="1" aria-label="BPM 数值"><span class="readout-unit">拍 / 分钟</span></div><input id="bpm" aria-label="BPM" type="range" min="60" max="200" step="1"></div>
-            <div class="timing-control swing"><label class="section-label" for="swing">律动 <span>Swing</span></label><div class="readout-line"><output id="swing-value" for="swing"></output><span class="readout-unit">% <span id="swing-description">摇摆</span></span></div><input id="swing" aria-label="Swing" type="range" min="50" max="75" step="1"></div>
-            <div class="master-control"><label class="section-label" for="master">主音量 <output id="master-value" for="master"></output></label><input id="master" aria-label="主音量" type="range" min="0" max="100" step="1"><div class="audio-status" id="audio-status"><i></i><span id="audio-hint">点击播放或步进键启用声音</span></div></div>
-          </section>
-          <section class="pattern-bar" aria-label="节奏预设"><div class="preset-picker"><label class="section-label" for="preset">节奏预设</label><select id="preset"><option value="custom" disabled>自定义节奏</option>${PRESETS.map(p => `<option value="${p.id}">${p.name} · ${p.genre}</option>`).join('')}</select></div><span class="pattern-meta" id="pattern-meta"></span><button id="clear" class="text-button">清空节奏 <span aria-hidden="true">↺</span></button></section>
-          <section id="sequencer" class="sequencer" aria-label="步进音序器" tabindex="-1"><div class="grid-scroll" tabindex="0" aria-label="鼓机网格，可左右滚动"><div class="step-grid" role="group" aria-label="八轨节奏网格"></div></div></section>
-          <footer class="panel-footer"><div class="velocity-legend"><span>力度</span><span><i class="ghost-dot"></i>弱音</span><span><i class="normal-dot"></i>普通</span><span><i class="accent-dot"></i>重音</span></div><p>点击写入 · 拖动绘制 · 右键 / ⌥ 点击切换力度<span class="touch-help">触屏长按切换力度 · 左右滑动查看全部步进</span></p><span class="save-status" id="save-status" role="status">自动保存在此浏览器</span></footer>
+          <div class="workspace">
+            <section id="sequencer" class="sequencer grid-card" aria-label="步进音序器" tabindex="-1">
+              <div class="grid-title"><h2 class="section-label">步进音序器</h2><span class="pattern-meta" id="pattern-meta"></span></div>
+              <div class="grid-scroll" tabindex="0" aria-label="鼓机网格，可左右滚动"><div class="step-grid" role="group" aria-label="八轨节奏网格"></div></div>
+              <footer class="panel-footer"><div class="audio-status" id="audio-status"><i></i><span id="audio-hint">点击播放或步进键启用声音</span></div><span class="scroll-hint">左右滑动查看步进 →</span></footer>
+            </section>
+            <aside class="side-panel" aria-label="节奏与声部设置">
+              <section class="side-section preset-picker" aria-label="节奏预设"><label class="section-label" for="preset">节奏预设</label><select id="preset"><option value="custom" disabled>自定义节奏</option>${PRESETS.map(p => `<option value="${p.id}">${p.name} · ${p.genre}</option>`).join('')}</select><button id="clear" class="text-button">清空节奏 <span aria-hidden="true">↺</span></button></section>
+              <section class="side-section selected-track" id="selected-track" aria-label="所选声部" data-track="BD"><h2 class="section-label">声部</h2><div class="selected-track-heading"><i class="track-dot"></i><span id="selected-track-id"></span><h3 id="selected-track-name"></h3></div><div class="mixer-control"><label for="track-volume">音量</label><output id="track-volume-value" for="track-volume"></output><input id="track-volume" type="range" min="0" max="100" data-mix="volume"></div><div class="mixer-control" id="tone-control"><label id="track-tone-label" for="track-tone"></label><output id="track-tone-value" for="track-tone"></output><input id="track-tone" type="range" min="0" max="100" data-mix="tone"></div></section>
+              <section class="side-section"><h2 class="section-label">力度</h2><div class="velocity-legend"><span><i class="legend-key ghost-key"></i>弱音</span><span><i class="legend-key normal-key"></i>普通</span><span><i class="legend-key accent-key"></i>重音</span></div></section>
+              <section class="side-section shortcuts"><h2 class="section-label">操作</h2><dl><div><dt><kbd>点击</kbd> / <kbd>拖动</kbd></dt><dd>写入步进</dd></div><div><dt><kbd>右键</kbd> / <kbd>⌥ 点击</kbd></dt><dd>切换力度</dd></div><div><dt><kbd>长按</kbd></dt><dd>触屏切换力度</dd></div><div><dt><kbd>声部名称</kbd></dt><dd>选择并试听</dd></div></dl></section>
+              <div class="save-status" id="save-status" role="status">已自动保存</div>
+            </aside>
+          </div>
         </section>
-        <div class="studio-footer"><span>用耳朵寻找答案，用节奏记录此刻。</span><span>纯粹的声音，从一个步进开始。</span></div>
       </main>`;
     this.renderGrid();
     this.bindControls();
@@ -50,15 +58,17 @@ export class Panel {
 
   private renderGrid(): void {
     const grid = this.element('.step-grid');
-    grid.style.setProperty('--steps', String(this.state.pattern.stepsPerBar));
-    let html = '<div class="track-heading sticky-track"><span>声部 / 混音</span><span>M · S</span></div>';
-    for (let step = 0; step < this.state.pattern.stepsPerBar; step++) {
-      html += `<div class="step-heading group-${Math.floor(step / 4) % 4}" data-head="${step}"><i></i><span>${String(step + 1).padStart(2, '0')}</span></div>`;
+    const steps = this.state.pattern.stepsPerBar;
+    grid.style.setProperty('--steps', String(steps));
+    grid.style.setProperty('--tracks', String(this.state.pattern.tracks.length));
+    let html = '<div class="playhead-column" hidden aria-hidden="true"></div><div class="track-heading sticky-track"><span>声部</span><span>M / S</span></div>';
+    for (let step = 0; step < steps; step++) {
+      html += `<div class="step-heading group-${Math.floor(step * 4 / steps)}" data-head="${step}"><span>${String(step + 1).padStart(2, '0')}</span><i></i></div>`;
     }
     for (const { id, name } of this.state.pattern.tracks) {
-      html += `<div class="track-panel sticky-track" data-track-panel="${id}"><div class="track-top"><span class="track-id">${id}</span><span class="track-name">${name}</span><button class="mix-button mute" data-id="${id}" data-mix="mute" aria-label="${name}静音" aria-pressed="false">M</button><button class="mix-button solo" data-id="${id}" data-mix="solo" aria-label="${name}独奏" aria-pressed="false">S</button></div><div class="track-sliders"><label><span>音量</span><input type="range" min="0" max="100" data-id="${id}" data-mix="volume" aria-label="${name}音量"></label>${toneNames[id] ? `<label><span>${toneNames[id]}</span><input type="range" min="0" max="100" data-id="${id}" data-mix="tone" aria-label="${name}${toneNames[id]}"></label>` : ''}</div></div>`;
-      for (let step = 0; step < this.state.pattern.stepsPerBar; step++) {
-        html += `<button class="step group-${Math.floor(step / 4) % 4}" data-track="${id}" data-step="${step}" data-velocity="0" aria-pressed="false"><span class="step-led"></span><span class="velocity-bars" aria-hidden="true"><i></i><i></i><i></i></span></button>`;
+      html += `<div class="track-panel sticky-track" data-track-panel="${id}"><button class="track-select" data-select-track="${id}" aria-label="${name}，选择并试听" aria-pressed="false"><i class="track-dot"></i><span class="track-id">${id}</span><span class="track-name">${name}</span></button><button class="mix-button mute" data-id="${id}" data-mix="mute" aria-label="${name}静音" aria-pressed="false">M</button><button class="mix-button solo" data-id="${id}" data-mix="solo" aria-label="${name}独奏" aria-pressed="false">S</button></div>`;
+      for (let step = 0; step < steps; step++) {
+        html += `<button class="step${step % (steps / 4) === 0 ? ' is-beat' : ''}" data-track="${id}" data-step="${step}" data-velocity="0" aria-pressed="false"><span class="step-led" aria-hidden="true"></span></button>`;
       }
     }
     grid.innerHTML = html;
@@ -90,6 +100,13 @@ export class Panel {
     this.element<HTMLSelectElement>('#preset').addEventListener('change', event => this.actions.preset((event.target as HTMLSelectElement).value));
     this.element('#clear').addEventListener('click', this.actions.clear);
     this.element('.step-grid').addEventListener('click', event => {
+      const track = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-select-track]');
+      if (track) {
+        this.selectedTrack = track.dataset.selectTrack as TrackId;
+        this.refreshSelection();
+        this.actions.audition(this.selectedTrack);
+        return;
+      }
       const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-mix]');
       if (button) {
         const id = button.dataset.id as TrackId;
@@ -97,9 +114,9 @@ export class Panel {
         this.actions.mix(id, key, !this.state.mixer[id][key]);
       }
     });
-    this.element('.step-grid').addEventListener('input', event => {
+    this.element('#selected-track').addEventListener('input', event => {
       const input = event.target as HTMLInputElement;
-      if (input.matches('input[data-mix]')) this.actions.mix(input.dataset.id as TrackId, input.dataset.mix as 'volume' | 'tone', Number(input.value) / 100);
+      if (input.matches('input[data-mix]')) this.actions.mix(this.selectedTrack, input.dataset.mix as 'volume' | 'tone', Number(input.value) / 100);
     });
   }
 
@@ -177,18 +194,36 @@ export class Panel {
     this.element<HTMLInputElement>('#bpm-number').value = String(state.bpm);
     this.element<HTMLInputElement>('#swing').value = String(state.swing);
     this.element('#swing-value').textContent = String(state.swing);
-    this.element('#swing-description').textContent = state.swing === 50 ? '平直' : '摇摆';
     this.element<HTMLInputElement>('#master').value = String(Math.round(state.master * 100));
     this.element('#master-value').textContent = `${Math.round(state.master * 100)}%`;
     this.element('#pattern-meta').textContent = `${state.pattern.tracks.length} 声部 / ${state.pattern.stepsPerBar} 步 / 4/4`;
     for (const { id } of TRACKS) {
       for (const key of ['mute', 'solo'] as const) this.element(`button[data-id="${id}"][data-mix="${key}"]`).setAttribute('aria-pressed', String(state.mixer[id][key]));
-      for (const key of ['volume', 'tone'] as const) {
-        const input = this.root.querySelector<HTMLInputElement>(`input[data-id="${id}"][data-mix="${key}"]`);
-        if (input) input.value = String(Math.round(state.mixer[id][key] * 100));
-      }
       this.element(`[data-track-panel="${id}"]`).classList.toggle('is-muted', state.mixer[id].mute || (TRACKS.some(t => state.mixer[t.id].solo) && !state.mixer[id].solo));
     }
+    this.refreshSelection();
+  }
+
+  private refreshSelection(): void {
+    const id = this.selectedTrack;
+    const track = this.state.pattern.tracks.find(track => track.id === id)!;
+    for (const { id: trackId } of TRACKS) {
+      const selected = trackId === id;
+      this.element(`[data-track-panel="${trackId}"]`).classList.toggle('is-selected', selected);
+      this.element(`[data-select-track="${trackId}"]`).setAttribute('aria-pressed', String(selected));
+    }
+    this.element('#selected-track').dataset.track = id;
+    this.element('#selected-track-id').textContent = id;
+    this.element('#selected-track-name').textContent = track.name;
+    for (const key of ['volume', 'tone'] as const) {
+      const value = Math.round(this.state.mixer[id][key] * 100);
+      this.element<HTMLInputElement>(`#track-${key}`).value = String(value);
+      this.element(`#track-${key}-value`).textContent = `${value}%`;
+    }
+    this.element('#tone-control').hidden = !toneNames[id];
+    this.element('#track-tone-label').textContent = toneNames[id] ?? '';
+    this.element('#track-volume').setAttribute('aria-label', `${track.name}音量`);
+    this.element('#track-tone').setAttribute('aria-label', `${track.name}${toneNames[id] ?? '音色'}`);
   }
 
   setPreset(id: string): void { this.element<HTMLSelectElement>('#preset').value = id; }
@@ -201,6 +236,9 @@ export class Panel {
   setPlayhead(step: number): void {
     if (this.playhead === step) return;
     this.playhead = step;
+    const overlay = this.element('.playhead-column');
+    overlay.hidden = step < 0;
+    overlay.style.gridColumn = `${step + 2} / span 1`;
     this.root.querySelectorAll<HTMLElement>('[data-head], .step').forEach(element => {
       const index = Number(element.dataset.head ?? element.dataset.step);
       element.classList.toggle('is-current', index === step);
@@ -211,6 +249,6 @@ export class Panel {
     this.element('#audio-hint').textContent = error ? '声音未启用，请再次点击播放' : running ? '声音已就绪' : '点击播放或步进键启用声音';
   }
   setStorageStatus(saved: boolean): void {
-    this.element('#save-status').textContent = saved ? '自动保存在此浏览器' : '浏览器无法保存，刷新前请保留页面';
+    this.element('#save-status').textContent = saved ? '已自动保存' : '浏览器无法保存，刷新前请保留页面';
   }
 }
