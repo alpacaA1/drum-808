@@ -1,5 +1,9 @@
 import { PRESETS, TRACKS, defaultSession, type Session, type TrackId, type Velocity } from '../sequencer/pattern';
-import { Knob } from './knob';
+import { Knob, type KnobOptions } from './knob';
+
+/** Swing ratio 50% (straight) … 75% ↔ swing amount 0 … 100%; 66.7% ratio (triplet) is amount 66.7%. */
+export const swingAmount = (ratio: number): number => Math.round((ratio - 50) * 4);
+export const swingRatio = (amount: number): number => 50 + amount / 4;
 
 export interface PanelActions {
   transport: () => void;
@@ -61,11 +65,12 @@ export class Panel {
 
   private createKnobs(): void {
     const defaults = defaultSession();
-    const add = (id: string, min: number, max: number, value: number, defaultValue: number, label: string, valueText: (value: number) => string, onChange: (value: number) => void) => {
-      this.knobs.set(id, new Knob(this.element(`#${id}`), { min, max, step: 1, value, defaultValue, label, valueText, onChange }));
+    const add = (id: string, min: number, max: number, value: number, defaultValue: number, label: string, valueText: (value: number) => string, onChange: (value: number) => void, mark?: KnobOptions['mark']) => {
+      this.knobs.set(id, new Knob(this.element(`#${id}`), { min, max, step: 1, value, defaultValue, label, valueText, onChange, mark }));
     };
     add('bpm', 60, 200, this.state.bpm, defaults.bpm, 'BPM', value => `${value} BPM`, value => this.actions.timing('bpm', value));
-    add('swing', 50, 75, this.state.swing, defaults.swing, 'Swing', value => `${value}% 摇摆`, value => this.actions.timing('swing', value));
+    // The knob shows swing amount 0–100% so the pointer matches the number; timing keeps the 50–75% ratio.
+    add('swing', 0, 100, swingAmount(this.state.swing), swingAmount(defaults.swing), 'Swing', value => value ? `${value}% 摇摆` : '直拍', value => this.actions.timing('swing', swingRatio(value)), { value: 200 / 3, label: '三连' });
     add('master', 0, 100, this.state.master * 100, defaults.master * 100, '主音量', value => `${value}% 音量`, value => this.actions.master(value / 100));
     add('track-volume', 0, 100, this.state.mixer.BD.volume * 100, defaults.mixer.BD.volume * 100, '底鼓音量', value => `${value}% 音量`, value => this.actions.mix(this.selectedTrack, 'volume', value / 100));
     add('track-tone', 0, 100, this.state.mixer.BD.tone * 100, defaults.mixer.BD.tone * 100, '底鼓衰减', value => `${value}%`, value => this.actions.mix(this.selectedTrack, 'tone', value / 100));
@@ -201,8 +206,8 @@ export class Panel {
     });
     this.knobs.get('bpm')!.setValue(state.bpm);
     this.element<HTMLInputElement>('#bpm-number').value = String(state.bpm);
-    this.knobs.get('swing')!.setValue(state.swing);
-    this.element('#swing-value').textContent = String(state.swing);
+    this.knobs.get('swing')!.setValue(swingAmount(state.swing));
+    this.element('#swing-value').textContent = String(swingAmount(state.swing));
     this.knobs.get('master')!.setValue(state.master * 100);
     this.element('#master-value').textContent = `${Math.round(state.master * 100)}%`;
     this.element('#pattern-meta').textContent = `${state.pattern.tracks.length} 声部 / ${state.pattern.stepsPerBar} 步 / 4/4`;

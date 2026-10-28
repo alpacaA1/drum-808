@@ -7,6 +7,8 @@ export interface KnobOptions {
   label: string;
   valueText: (value: number) => string;
   onChange: (value: number) => void;
+  /** Highlighted reference mark on the scale, e.g. the triplet feel on Swing. */
+  mark?: { value: number; label: string };
 }
 
 /** One control for mouse, touch and keyboard; setValue never emits a change. */
@@ -28,7 +30,14 @@ export class Knob {
       const angle = (-135 + index * 45) * Math.PI / 180;
       return `<line x1="${50 + Math.sin(angle) * 44}" y1="${50 - Math.cos(angle) * 44}" x2="${50 + Math.sin(angle) * 48}" y2="${50 - Math.cos(angle) * 48}" />`;
     }).join('');
-    element.innerHTML = `<svg class="knob-scale" viewBox="0 0 100 100" aria-hidden="true"><g class="knob-ticks">${ticks}</g><path class="knob-rail" d="M21.716 78.284 A40 40 0 1 1 78.284 78.284" pathLength="100"/><path class="knob-value-arc" d="M21.716 78.284 A40 40 0 1 1 78.284 78.284" pathLength="100"/></svg><span class="knob-grip" aria-hidden="true"><span class="knob-cap"></span><span class="knob-pointer"></span></span>`;
+    let mark = '';
+    if (options.mark) {
+      const angle = (-135 + (options.mark.value - options.min) / (options.max - options.min) * 270) * Math.PI / 180;
+      const at = (radius: number) => [50 + Math.sin(angle) * radius, 50 - Math.cos(angle) * radius];
+      const [x1, y1] = at(42), [x2, y2] = at(50), [tx, ty] = at(60);
+      mark = `<g class="knob-mark"><line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" /><text x="${tx}" y="${ty}">${options.mark.label}</text></g>`;
+    }
+    element.innerHTML = `<svg class="knob-scale" viewBox="0 0 100 100" aria-hidden="true"><g class="knob-ticks">${ticks}</g>${mark}<path class="knob-rail" d="M21.716 78.284 A40 40 0 1 1 78.284 78.284" pathLength="100"/><path class="knob-value-arc" d="M21.716 78.284 A40 40 0 1 1 78.284 78.284" pathLength="100"/></svg><span class="knob-grip" aria-hidden="true"><span class="knob-cap"></span><span class="knob-pointer"></span></span>`;
     this.arc = element.querySelector<SVGPathElement>('.knob-value-arc')!;
     this.setValue(options.value);
     element.addEventListener('pointerdown', event => {
@@ -97,6 +106,8 @@ export class Knob {
     const ratio = (this.value - min) / (max - min);
     this.element.style.setProperty('--knob-angle', `${-135 + ratio * 270}deg`);
     this.arc?.setAttribute('stroke-dasharray', `${ratio * 100} 100`);
+    // A zero-length dash still paints a round cap; hide the arc at the minimum.
+    this.arc?.style.setProperty('visibility', ratio > 0 ? 'visible' : 'hidden');
     this.element.setAttribute('aria-valuenow', String(this.value));
     this.element.setAttribute('aria-valuetext', this.options.valueText(this.value));
   }

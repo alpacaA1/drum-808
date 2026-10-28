@@ -148,3 +148,26 @@ test('top-bar knobs close-up at 2x device scale', async ({ browser }) => {
   await page.screenshot({ path: `${artifacts}/top-knobs-2x.png`, clip });
   await context.close();
 });
+
+test('swing knob pointer matches its readout and stores the 50–75% ratio', async ({ page }) => {
+  await page.goto('/');
+  const knob = page.getByRole('slider', { name: 'Swing', exact: true });
+  const angle = () => knob.evaluate(element => parseFloat(getComputedStyle(element).getPropertyValue('--knob-angle')));
+  const stored = () => page.evaluate(() => JSON.parse(localStorage.getItem('drum808.session.v1')!).swing as number);
+  await knob.press('End');
+  await knob.press('Home');
+  await expect(page.locator('#swing-value')).toHaveText('0');
+  await expect(knob).toHaveAttribute('aria-valuetext', '直拍');
+  expect(await angle()).toBeCloseTo(-135);
+  expect(await stored()).toBe(50);
+  await expect(knob.locator('.knob-value-arc')).toBeHidden();
+  for (let count = 0; count < 5; count++) await knob.press('PageUp');
+  await expect(page.locator('#swing-value')).toHaveText('50');
+  expect(await angle()).toBeCloseTo(0);
+  expect(await stored()).toBe(62.5);
+  await knob.press('End');
+  await expect(page.locator('#swing-value')).toHaveText('100');
+  expect(await angle()).toBeCloseTo(135);
+  expect(await stored()).toBe(75);
+  await expect(knob.locator('.knob-mark text')).toHaveText('三连');
+});

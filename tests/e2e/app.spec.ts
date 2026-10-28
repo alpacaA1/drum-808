@@ -13,7 +13,7 @@ test('desktop editing, transport, controls, persistence and screenshots', async 
   await expect(page.getByRole('heading', { name: 'Drum 808' })).toBeVisible();
   await expect(page.locator('.step')).toHaveCount(128);
   await page.locator('#preset').selectOption('jazz');
-  await expect(page.locator('#swing-value')).toHaveText('64');
+  await expect(page.locator('#swing-value')).toHaveText('56');
   await expect(page.locator('.panel-footer')).toBeInViewport({ ratio: 1 });
   await page.screenshot({ path: `${artifacts}/desktop-stopped.png` });
   await page.getByRole('button', { name: /清空节奏/ }).click();
@@ -43,8 +43,8 @@ test('desktop editing, transport, controls, persistence and screenshots', async 
   await page.getByLabel('BPM 数值').fill('146');
   await page.getByLabel('BPM 数值').press('Tab');
   await expect(page.getByRole('slider', { name: 'BPM', exact: true })).toHaveAttribute('aria-valuenow', '146');
-  await setKnob(page, 'Swing', 69);
-  await expect(page.locator('#swing-value')).toHaveText('69');
+  await setKnob(page, 'Swing', 76);
+  await expect(page.locator('#swing-value')).toHaveText('76');
   await page.getByLabel('底鼓静音').click();
   await page.getByLabel('军鼓独奏').click();
   await page.getByRole('button', { name: '开镲，选择并试听' }).click();
@@ -53,7 +53,7 @@ test('desktop editing, transport, controls, persistence and screenshots', async 
   await page.reload();
   await expect(cell).toHaveAttribute('data-velocity', '1');
   await expect(page.getByLabel('BPM 数值')).toHaveValue('146');
-  await expect(page.locator('#swing-value')).toHaveText('69');
+  await expect(page.locator('#swing-value')).toHaveText('76');
   await expect(page.getByLabel('底鼓静音')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByLabel('军鼓独奏')).toHaveAttribute('aria-pressed', 'true');
   await page.getByRole('button', { name: '开镲，选择并试听' }).click();
