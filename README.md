@@ -2,13 +2,15 @@
 
 浏览器里的节奏机。八种鼓声由 Web Audio 实时合成，打开页面就能写节奏。第一版采用原生 DOM 与 TypeScript，不需要后端，不加载采样、网络字体或第三方运行时。
 
+在线试用：<https://alpacaa1.github.io/drum-808/>（推送到 `main` 后由 GitHub Actions 自动构建发布）。
+
 ## 本地运行
 
 需要 Node.js 22.12+ 与 npm 10。
 
 ```sh
 npm install
-npm run dev
+npm run dev        # http://127.0.0.1:5808
 ```
 
 打开终端显示的本地地址。首次点击播放或步进键时启用声音，建议先降低设备音量。
