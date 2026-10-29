@@ -51,6 +51,7 @@ export class Panel {
             </section>
             <aside class="side-panel" aria-label="节奏与声部设置">
               <section class="side-section preset-picker" aria-label="节奏预设"><label class="section-label" for="preset">节奏预设</label><select id="preset"><option value="custom" disabled>自定义节奏</option>${PRESETS.map(p => `<option value="${p.id}">${p.name} · ${p.genre}</option>`).join('')}</select><button id="clear" class="text-button">清空节奏 <span aria-hidden="true">↺</span></button></section>
+              <section class="side-section rhythm-library" id="rhythm-library" aria-label="我的节奏"></section>
               <section class="side-section selected-track" id="selected-track" aria-label="所选声部" data-track="BD"><h2 class="section-label">声部</h2><div class="selected-track-heading"><i class="track-dot"></i><span id="selected-track-id"></span><h3 id="selected-track-name"></h3></div><div class="track-knobs"><div class="mixer-control rotary-control"><div id="track-volume"></div><div class="control-readout"><span>音量</span><output id="track-volume-value"></output></div></div><div class="mixer-control rotary-control" id="tone-control"><div id="track-tone"></div><div class="control-readout"><span id="track-tone-label"></span><output id="track-tone-value"></output></div></div></div></section>
               <section class="side-section perform" aria-label="演奏"><h2 class="section-label">演奏</h2><div class="perform-toggles"><button id="metronome" class="toggle-key" aria-pressed="false"><i class="toggle-led" aria-hidden="true"></i>节拍器</button><button id="record" class="toggle-key record" aria-pressed="false"><i class="toggle-led" aria-hidden="true"></i>录制</button></div><div class="key-map">${Object.entries(PLAY_KEYS).map(([code, id]) => `<span data-key-track="${id}"><kbd>${code.slice(3)}</kbd>${id}</span>`).join('')}</div><p class="perform-hint">按键实时演奏，<kbd>Shift</kbd> 为重音；播放中打开录制，按键会写入最近的步进</p></section>
               <section class="side-section"><h2 class="section-label">力度</h2><div class="velocity-legend"><span><i class="legend-key ghost-key"></i>弱音</span><span><i class="legend-key normal-key"></i>普通</span><span><i class="legend-key accent-key"></i>重音</span></div></section>
@@ -283,6 +284,7 @@ export class Panel {
   }
 
   setPreset(id: string): void { this.element<HTMLSelectElement>('#preset').value = id; }
+  focusPreset(): void { this.element('#preset').focus(); }
   setPlaying(playing: boolean): void {
     this.element('#transport').setAttribute('aria-pressed', String(playing));
     this.element('#transport').setAttribute('aria-label', playing ? '停止' : '播放');

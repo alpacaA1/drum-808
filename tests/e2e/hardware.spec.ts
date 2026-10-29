@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
-const artifacts = '.codex-runs/20261028-144635-m1-sequencer/artifacts-4';
+const artifacts = '.codex-runs/20261029-135010-save-library/artifacts-1';
 const values = (page: Page) => page.locator('.step').evaluateAll(cells => cells.map(cell => cell.getAttribute('data-velocity')));
 async function dragUp(page: Page, knob: Locator, distance: number): Promise<void> {
   const rect = (await knob.boundingBox())!;

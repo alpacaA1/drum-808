@@ -3,10 +3,20 @@ import { AudioEngine } from './audio/engine';
 import { SequencerClock, nearestStep, startTicker, type StepEvent, type Timing } from './sequencer/clock';
 import { clearPattern, cycleVelocity, defaultSession, deserialize, isTripletGrid, loadPreset, resizePattern, serialize, setVelocity, toggleStep, type TrackId, type Velocity } from './sequencer/pattern';
 import { Panel } from './ui/panel';
+import { CURRENT_KEY, addRhythm, downloadName, exportLibrary, exportRhythm, importRhythms, readCurrent, readLibrary, rhythmHash, toRhythm, uniqueName, writeLibrary, type SavedRhythm } from './sequencer/library';
+import { LibraryPanel } from './ui/library';
 
 const STORAGE_KEY = 'drum808.session.v1';
 let state = defaultSession();
 try { state = deserialize(localStorage.getItem(STORAGE_KEY)); } catch { /* Storage can be disabled. */ }
+let libraryRead;
+try { libraryRead = readLibrary(localStorage); }
+catch { libraryRead = { items: [] as SavedRhythm[], writable: false, error: '浏览器无法读取节奏库，请导出文件保留当前内容' }; }
+let library = libraryRead.items;
+let current = readCurrent(null, state, library);
+try { current = readCurrent(localStorage.getItem(CURRENT_KEY), state, library); } catch { /* Keep the working session in memory. */ }
+let selectedPreset = 'custom';
+const dirty = (): boolean => rhythmHash(state) !== current.savedHash;
 const engine = new AudioEngine(state.mixer, state.master);
 let playing = false;
 let starting = false;
@@ -45,16 +55,62 @@ const clock = new SequencerClock(
   },
 );
 
-function persist(): void {
-  try { localStorage.setItem(STORAGE_KEY, serialize(state)); panel.setStorageStatus(true); }
-  catch { panel.setStorageStatus(false); }
+function persist(): boolean {
+  try {
+    localStorage.setItem(STORAGE_KEY, serialize(state));
+    localStorage.setItem(CURRENT_KEY, JSON.stringify(current));
+    panel.setStorageStatus(true);
+    return true;
+  } catch {
+    panel.setStorageStatus(false);
+    libraryPanel.message('浏览器无法保存，当前内容保留在本页，请导出文件备份', true);
+    return false;
+  }
 }
 
-function refresh(custom = true): void {
+function refresh(custom = true): boolean {
   panel.refresh(state);
-  if (custom) panel.setPreset('custom');
+  if (custom) setPreset('custom');
+  libraryPanel.update(library, current.id, dirty());
   engine.updateMixer(state.mixer, state.master);
-  persist();
+  return persist();
+}
+
+function setPreset(id: string): void { selectedPreset = id; panel.setPreset(id); }
+
+function protect(action: () => void): void {
+  if (!dirty()) { libraryPanel.closeConfirm(); libraryPanel.closeName(); action(); return; }
+  libraryPanel.confirm(
+    () => libraryPanel.openName(name => {
+      if (saveAs(name)) { libraryPanel.closeConfirm(); action(); }
+    }),
+    () => { libraryPanel.closeConfirm(); libraryPanel.closeName(); action(); },
+    () => { libraryPanel.closeConfirm(); libraryPanel.closeName(); panel.focusPreset(); },
+  );
+}
+
+function storeLibrary(): boolean {
+  try { return writeLibrary(localStorage, library); } catch { return false; }
+}
+
+function saveAs(name: string): boolean {
+  try {
+    const item = addRhythm(library, name, state);
+    library = [...library, item];
+    current = { id: item.id, savedHash: rhythmHash(item.rhythm) };
+    const saved = storeLibrary();
+    const sessionSaved = refresh(false);
+    libraryPanel.closeName();
+    if (!saved || sessionSaved) libraryPanel.message(saved ? `已保存「${item.name}」` : '浏览器无法保存节奏库，当前内容保留在本页，请导出文件备份', !saved);
+    return saved && sessionSaved;
+  } catch (error) { libraryPanel.message((error as Error).message, true); return false; }
+}
+
+function download(content: string, name: string): void {
+  const url = URL.createObjectURL(new Blob([content], { type: 'application/json' }));
+  const link = document.createElement('a'); link.href = url; link.download = name;
+  document.body.append(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 async function unlock(): Promise<boolean> {
@@ -119,16 +175,23 @@ const panel = new Panel(document.querySelector<HTMLElement>('#app')!, state, {
   },
   master: value => { state.master = value; refresh(false); },
   preset: id => {
-    const preset = loadPreset(id);
-    regrid(preset.pattern.stepsPerBar, () => { state = { ...state, pattern: preset.pattern, bpm: preset.bpm, swing: preset.swing }; });
-    skipOnce.clear();
-    refresh(false); panel.setPreset(id);
+    panel.setPreset(selectedPreset);
+    protect(() => {
+      const preset = loadPreset(id);
+      regrid(preset.pattern.stepsPerBar, () => { state = { ...state, pattern: preset.pattern, bpm: preset.bpm, swing: preset.swing }; });
+      skipOnce.clear();
+      current = { id: null, savedHash: rhythmHash(state) };
+      refresh(false); setPreset(id);
+    });
   },
-  clear: () => { clearPattern(state.pattern); skipOnce.clear(); refresh(); },
+  clear: () => protect(() => { clearPattern(state.pattern); skipOnce.clear(); refresh(); }),
   grid: steps => {
     if (steps === state.pattern.stepsPerBar) return;
-    regrid(steps, () => { state = { ...state, pattern: resizePattern(state.pattern, steps) }; });
-    refresh();
+    protect(() => {
+      regrid(steps, () => { state = { ...state, pattern: resizePattern(state.pattern, steps) }; });
+      skipOnce.clear();
+      refresh();
+    });
   },
   play: (id, accent) => {
     const level: Velocity = accent ? 3 : 2;
@@ -142,6 +205,66 @@ const panel = new Panel(document.querySelector<HTMLElement>('#app')!, state, {
   },
   perform: (key, on) => { if (key === 'metronome') metronome = on; else recording = on; },
 });
+
+const libraryPanel = new LibraryPanel(document.querySelector<HTMLElement>('#rhythm-library')!, {
+  save: () => {
+    const item = library.find(item => item.id === current.id);
+    if (!item) { libraryPanel.closeConfirm(); libraryPanel.openName(saveAs); return; }
+    library = library.map(saved => saved.id === item.id ? { ...saved, updatedAt: Date.now(), rhythm: toRhythm(state) } : saved);
+    current.savedHash = rhythmHash(state);
+    const saved = storeLibrary();
+    const sessionSaved = refresh(false);
+    if (!saved || sessionSaved) libraryPanel.message(saved ? `已保存「${item.name}」` : '浏览器无法保存节奏库，当前内容保留在本页，请导出文件备份', !saved);
+  },
+  saveAs: () => { libraryPanel.closeConfirm(); libraryPanel.openName(saveAs); },
+  load: id => protect(() => {
+    const item = library.find(item => item.id === id);
+    if (!item) return;
+    regrid(item.rhythm.pattern.stepsPerBar, () => { state = { ...toRhythm(item.rhythm), master: state.master }; });
+    skipOnce.clear(); recent = [];
+    current = { id: item.id, savedHash: rhythmHash(item.rhythm) };
+    if (refresh()) libraryPanel.message(`已载入「${item.name}」`);
+  }),
+  rename: (id, name) => {
+    try {
+      const renamed = uniqueName(name, library.filter(item => item.id !== id));
+      library = library.map(item => item.id === id ? { ...item, name: renamed, updatedAt: Date.now() } : item);
+      const saved = storeLibrary();
+      libraryPanel.update(library, current.id, dirty());
+      libraryPanel.message(saved ? `已改名为「${renamed}」` : '浏览器无法保存改名，当前内容保留在本页，请导出文件备份', !saved);
+    } catch (error) { libraryPanel.message((error as Error).message, true); }
+  },
+  delete: id => {
+    library = library.filter(item => item.id !== id);
+    if (current.id === id) current.id = null;
+    const saved = storeLibrary();
+    const sessionSaved = refresh(false);
+    if (!saved || sessionSaved) libraryPanel.message(saved ? '已删除节奏' : '浏览器无法保存删除结果，当前内容保留在本页', !saved);
+  },
+  export: id => {
+    const item = library.find(item => item.id === id);
+    if (item) download(exportRhythm(item), downloadName(item.name));
+  },
+  exportAll: () => { download(exportLibrary(library), downloadName(null)); },
+  import: files => { void (async () => {
+    let added = 0, skipped = 0, full = 0;
+    const reports: string[] = [];
+    for (const file of files) {
+      try {
+        const result = importRhythms(await file.text(), file.name, library);
+        library = result.items;
+        added += result.added; skipped += result.skipped; full += result.full;
+        reports.push(`${file.name}：已导入 ${result.added} 段，跳过 ${result.skipped} 个无效项目`);
+      } catch { skipped++; reports.push(`${file.name}：读取失败`); }
+    }
+    const saved = !added || storeLibrary();
+    libraryPanel.update(library, current.id, dirty());
+    const report = `已导入 ${added} 段，跳过 ${skipped} 个无效文件或节奏`;
+    libraryPanel.message(`${report}${full ? `；节奏库最多 200 段，另有 ${full} 段未导入` : ''}${saved ? '' : '；浏览器无法保存，请导出文件备份'}${files.length > 1 ? `\n${reports.join('\n')}` : ''}`, !saved || full > 0);
+  })(); },
+});
+libraryPanel.update(library, current.id, dirty());
+if (libraryRead.error) libraryPanel.message(libraryRead.error, true);
 
 /** Players hit along with what they hear: map "now" to the audio time currently leaving the speakers. */
 function heardTime(ctx: AudioContext): number {
@@ -158,6 +281,6 @@ function regrid(steps: number, apply: () => void): void {
   if (restart) void transport();
 }
 // Persisted edits may no longer match a named preset.
-panel.setPreset('custom');
-try { if (!localStorage.getItem(STORAGE_KEY)) panel.setPreset('electro'); } catch { panel.setStorageStatus(false); }
+setPreset('custom');
+try { if (!localStorage.getItem(STORAGE_KEY)) setPreset('electro'); } catch { panel.setStorageStatus(false); }
 window.addEventListener('pagehide', () => { stop(); persist(); });

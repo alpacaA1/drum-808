@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { setKnob } from './controls';
 
-const artifacts = '.codex-runs/20261028-144635-m1-sequencer/artifacts-4';
+const artifacts = '.codex-runs/20261029-135010-save-library/artifacts-1';
 
 test('all tracks have at least 3:1 off/on contrast and three distinct velocity treatments', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -58,6 +58,8 @@ test('all tracks have at least 3:1 off/on contrast and three distinct velocity t
   const motion = await page.locator('.step').first().evaluate(cell => ({ animation: getComputedStyle(cell).animationName, transition: getComputedStyle(cell).transitionDuration }));
   expect(motion).toEqual({ animation: 'none', transition: '0s' });
   await page.locator('#preset').selectOption('jazz');
+  await expect(page.getByText('当前节奏还没保存', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '不保存，继续', exact: true }).click();
   await page.locator('h1').click();
   await page.locator('.machine').evaluate(element => { element.style.filter = 'grayscale(1)'; });
   await page.screenshot({ path: `${artifacts}/desktop-grayscale.png` });

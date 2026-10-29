@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { setKnob } from './controls';
 
-const artifacts = '.codex-runs/20261028-144635-m1-sequencer/artifacts-4';
+const artifacts = '.codex-runs/20261029-135010-save-library/artifacts-1';
 
 test('desktop editing, transport, controls, persistence and screenshots', async ({ page }) => {
   const errors: string[] = [];
@@ -72,6 +72,8 @@ test('desktop editing, transport, controls, persistence and screenshots', async 
   await page.getByLabel('底鼓静音').click();
   await page.getByLabel('军鼓独奏').click();
   await page.locator('#preset').selectOption('jazz');
+  await expect(page.getByText('当前节奏还没保存', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '不保存，继续', exact: true }).click();
   await page.getByRole('button', { name: '播放', exact: true }).click();
   await expect(page.locator('.step-heading.is-current')).toHaveCount(1);
   await expect.poll(async () => Number(await page.locator('.step-heading.is-current').getAttribute('data-head'))).toBeGreaterThan(1);

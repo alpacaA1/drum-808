@@ -18,8 +18,12 @@ test('triplet grids re-quantise the pattern, bypass swing and persist', async ({
   await page.reload();
   await expect(page.locator('.step[data-track="BD"]')).toHaveCount(12);
   await page.getByRole('radio', { name: /24/ }).click();
+  await expect(page.getByText('当前节奏还没保存', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '不保存，继续', exact: true }).click();
   await expect(page.locator('.step[data-track="BD"]')).toHaveCount(24);
   await page.getByRole('radio', { name: /16/ }).click();
+  await expect(page.getByText('当前节奏还没保存', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '不保存，继续', exact: true }).click();
   await expect(page.locator('.step[data-track="BD"]')).toHaveCount(16);
   await expect(page.locator('.swing')).not.toHaveClass(/is-inactive/);
 });

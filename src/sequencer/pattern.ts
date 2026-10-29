@@ -132,8 +132,13 @@ export function serialize(session: Session): string {
 }
 
 export function deserialize(json: string | null): Session {
+  try { return validateSession(JSON.parse(json ?? 'null')) ?? defaultSession(); }
+  catch { return defaultSession(); }
+}
+
+/** Shared strict validation; callers importing data must be able to distinguish invalid data from a default. */
+export function validateSession(data: unknown): Session | null {
   try {
-    const data: unknown = JSON.parse(json ?? 'null');
     if (!object(data) || data.version !== 1 || !object(data.pattern) || !object(data.mixer)) throw new Error('格式不匹配');
     const { stepsPerBar, tracks } = data.pattern;
     if (!between(stepsPerBar, 2, 128) || !Number.isInteger(stepsPerBar) || stepsPerBar % 2 || !Array.isArray(tracks) || tracks.length !== TRACKS.length) throw new Error('步数不合法');
@@ -152,6 +157,6 @@ export function deserialize(json: string | null): Session {
     if (!between(data.bpm, 60, 200) || !between(data.swing, 50, 75) || !between(data.master, 0, 1)) throw new Error('参数不合法');
     return { pattern, bpm: data.bpm, swing: data.swing, master: data.master, mixer };
   } catch {
-    return defaultSession();
+    return null;
   }
 }
