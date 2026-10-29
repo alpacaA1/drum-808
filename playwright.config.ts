@@ -5,15 +5,15 @@ export default defineConfig({
   fullyParallel: true,
   reporter: 'list',
   use: {
-    baseURL: 'http://127.0.0.1:5173',
+    baseURL: 'http://127.0.0.1:5808',
     browserName: 'chromium',
     launchOptions: {
       args: ['--autoplay-policy=no-user-gesture-required'],
     },
   },
   webServer: {
-    command: 'npm run dev -- --port 5173 --strictPort',
-    url: 'http://127.0.0.1:5173',
+    command: 'npm run dev',
+    url: 'http://127.0.0.1:5808',
     reuseExistingServer: true,
   },
 });

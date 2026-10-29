@@ -44,7 +44,7 @@ test('real OfflineAudioContext renders all voices, velocities and master ceiling
     // Also stress beyond the preset: every voice on every step, all accents.
     const denseBar = await renderBar(true);
     // The engine uses exactly the same voices and chain offline; exercise choke through it.
-    async function renderHat(choke?: 'CH' | 'OH') {
+    async function renderHat(choke?: 'CH' | 'OH', order: 'in-order' | 'choke-first' | 'same-onset' | 'same-onset-choke-first' = 'in-order') {
       const offline = new OfflineAudioContext(1, 48000, 48000);
       const engine = new AudioEngine(createMixer(), 1);
       engine.context = offline as unknown as AudioContext;
@@ -52,8 +52,20 @@ test('real OfflineAudioContext renders all voices, velocities and master ceiling
       const internal = engine as unknown as { master: ReturnType<typeof createMasterChain>; newBus: () => void };
       internal.master = createMasterChain(offline, offline.destination, 1);
       internal.newBus();
-      engine.trigger('OH', 0.01, 3);
-      if (choke) engine.trigger(choke, 0.09, 3);
+      if (order === 'choke-first' && choke) {
+        // Live play: the closed hat was scheduled by the clock before the open hat was played by hand.
+        engine.trigger(choke, 0.09, 3);
+        engine.trigger('OH', 0.01, 3);
+      } else if (order === 'same-onset-choke-first' && choke) {
+        engine.trigger(choke, 0.09, 3);
+        engine.trigger('OH', 0.09, 3);
+      } else if (order === 'same-onset' && choke) {
+        engine.trigger('OH', 0.09, 3);
+        engine.trigger(choke, 0.09, 3);
+      } else {
+        engine.trigger('OH', 0.01, 3);
+        if (choke) engine.trigger(choke, 0.09, 3);
+      }
       const buffer = await offline.startRendering();
       const data = buffer.getChannelData(0);
       let energy = 0;
@@ -62,7 +74,12 @@ test('real OfflineAudioContext renders all voices, velocities and master ceiling
     }
     const hatTail = await renderHat();
     const chokedTail = await renderHat('CH');
-    return { voices, fullBar, denseBar, hatTail, chokedTail };
+    const chokedOutOfOrderTail = await renderHat('CH', 'choke-first');
+    const sameOnsetTail = await renderHat('CH', 'same-onset');
+    const sameOnsetChokeFirstTail = await renderHat('CH', 'same-onset-choke-first');
+    // Two open hats at one onset must not cut each other.
+    const twoOpenHatsTail = await renderHat('OH', 'same-onset');
+    return { voices, fullBar, denseBar, hatTail, chokedTail, chokedOutOfOrderTail, sameOnsetTail, sameOnsetChokeFirstTail, twoOpenHatsTail };
   });
   console.log('Offline audio peaks:', JSON.stringify(results, null, 2));
   for (const voice of results.voices) {
@@ -78,4 +95,8 @@ test('real OfflineAudioContext renders all voices, velocities and master ceiling
   expect(results.denseBar.finite).toBe(true);
   expect(results.denseBar.peak).toBeLessThanOrEqual(1);
   expect(results.chokedTail).toBeLessThan(results.hatTail * 0.01);
+  expect(results.chokedOutOfOrderTail).toBeLessThan(results.hatTail * 0.01);
+  expect(results.sameOnsetTail).toBeLessThan(results.hatTail * 0.01);
+  expect(results.sameOnsetChokeFirstTail).toBeLessThan(results.hatTail * 0.01);
+  expect(results.twoOpenHatsTail).toBeGreaterThan(results.hatTail * 0.5);
 });

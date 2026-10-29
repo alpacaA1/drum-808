@@ -50,6 +50,28 @@ export function cycleVelocity(pattern: Pattern, id: TrackId, step: number): Velo
   return value;
 }
 
+/** 16 = straight sixteenths; 12 and 24 are triplet grids (3 or 6 steps per beat). */
+export const GRIDS = [
+  { steps: 16, label: '16', name: '十六分' },
+  { steps: 12, label: '12', name: '八分三连' },
+  { steps: 24, label: '24', name: '十六分三连' },
+] as const;
+export const isTripletGrid = (stepsPerBar: number): boolean => stepsPerBar % 3 === 0;
+
+/** Re-quantise every hit to the nearest position on the new grid; collisions keep the louder hit. */
+export function resizePattern(pattern: Pattern, stepsPerBar: number): Pattern {
+  const next = createPattern(stepsPerBar);
+  for (const track of next.tracks) {
+    const source = pattern.tracks.find(item => item.id === track.id);
+    source?.steps.forEach((value, step) => {
+      if (!value) return;
+      const target = Math.round(step * stepsPerBar / pattern.stepsPerBar) % stepsPerBar;
+      track.steps[target] = Math.max(track.steps[target], value) as Velocity;
+    });
+  }
+  return next;
+}
+
 export function clearPattern(pattern: Pattern): void {
   pattern.tracks.forEach(track => track.steps.fill(0));
 }
@@ -60,9 +82,10 @@ export function createMixer(): Mixer {
 
 export interface Preset { id: string; name: string; genre: string; bpm: number; swing: number; pattern: Pattern }
 function preset(id: string, name: string, genre: string, bpm: number, swing: number, rows: Partial<Record<TrackId, string>>): Preset {
-  const pattern = createPattern();
+  const length = Object.values(rows)[0]?.length ?? 16;
+  const pattern = createPattern(length);
   pattern.tracks.forEach(track => {
-    track.steps = (rows[track.id] ?? '0000000000000000').split('').map(Number) as Velocity[];
+    track.steps = (rows[track.id] ?? '0'.repeat(length)).split('').map(Number) as Velocity[];
   });
   return { id, name, genre, bpm, swing, pattern };
 }
@@ -82,6 +105,13 @@ export const PRESETS: Preset[] = [
   }),
   preset('jazz', '午夜切分', 'Swung groove', 96, 64, {
     BD: '3000000000200000', SD: '0010300101003010', CH: '2021202120212021', OH: '0000002000000020', RS: '0000000000200000', CB: '2000000000002000',
+  }),
+  // 12-step triplet grid: one beat = three triplet eighths. 808 has no ride, so the open hat plays the ride figure.
+  preset('jazzride', '爵士 Ride', 'Jazz ride · 三连', 132, 50, {
+    BD: '100100100100', SD: '000001001002', OH: '200301200301', RS: '000000000200',
+  }),
+  preset('shuffle', '半拍摇摆', 'Shuffle · 三连', 92, 50, {
+    BD: '300000302000', SD: '000301000301', CH: '302202302202',
   }),
 ];
 

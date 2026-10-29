@@ -42,6 +42,8 @@ export class AudioEngine {
   private tracks = new Map<TrackId, GainNode>();
   private bus?: GainNode;
   private hats: HatGate[] = [];
+  /** Onset times of every CH/OH hit; live play can insert an OH before hats that are already scheduled. */
+  private hatOnsets: { time: number; closed: boolean }[] = [];
 
   constructor(private mixer: Mixer, private volume: number) {}
 
@@ -89,27 +91,57 @@ export class AudioEngine {
     const ctx = this.context;
     const tone = this.mixer[id].tone;
     const dest = this.tracks.get(id)!;
-    if (id === 'CH' || id === 'OH') this.chokeHats(time);
+    if (id === 'CH' || id === 'OH') {
+      this.chokeHats(time);
+      this.hatOnsets = this.hatOnsets.filter(onset => onset.time > ctx.currentTime - 0.05);
+    }
     if (id === 'OH') {
       const gain = ctx.createGain(); gain.connect(dest);
       const decay = 0.15 + tone * 0.85;
       const hat: HatGate = { gain, start: time, end: time + decay + 0.02 };
       this.hats.push(hat);
+      // A hat that is already scheduled later still chokes this one, whatever order the calls came in.
+      // At the same onset only a closed hat wins (as in the sequencer's CH-after-OH order); two open hats both ring.
+      const next = Math.min(...this.hatOnsets.filter(onset => onset.time > time || (onset.closed && onset.time === time)).map(onset => onset.time));
+      if (next < hat.end) this.cutHat(hat, next);
       VOICES.OH(ctx, gain, time, VELOCITY_GAIN[level], { decay, onEnded: () => {
         gain.disconnect(); this.hats = this.hats.filter(item => item !== hat);
       } });
     } else {
       VOICES[id](ctx, dest, time, VELOCITY_GAIN[level], { tone, decay: 0.2 + tone * 0.65 });
     }
+    if (id === 'CH' || id === 'OH') this.hatOnsets.push({ time, closed: id === 'CH' });
+  }
+
+  /** Metronome blip on the transport bus, so Stop fades it with the notes. Downbeat is higher. */
+  click(time: number, downbeat: boolean): void {
+    if (!this.context || !this.bus) return;
+    const ctx = this.context;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = downbeat ? 1760 : 1320;
+    gain.gain.setValueAtTime(0.0001, time);
+    gain.gain.exponentialRampToValueAtTime(downbeat ? 0.3 : 0.18, time + 0.001);
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.035);
+    osc.connect(gain); gain.connect(this.bus);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+    osc.start(time); osc.stop(time + 0.045);
   }
 
   private chokeHats(time: number): void {
     for (const hat of this.hats) {
       if (hat.start > time || hat.end <= time || (hat.cut !== undefined && hat.cut <= time)) continue;
-      hat.cut = time;
-      hat.gain.gain.setValueAtTime(1, time);
-      hat.gain.gain.linearRampToValueAtTime(0.00001, time + 0.008);
+      this.cutHat(hat, time);
     }
+  }
+
+  /** Cuts may arrive out of order; an earlier cut replaces any later one already automated. */
+  private cutHat(hat: HatGate, time: number): void {
+    hat.cut = time;
+    hat.gain.gain.cancelScheduledValues(time);
+    hat.gain.gain.setValueAtTime(1, time);
+    hat.gain.gain.linearRampToValueAtTime(0.00001, time + 0.008);
   }
 
   /** Retire the complete old bus, including already-scheduled lookahead notes. */
@@ -121,6 +153,7 @@ export class AudioEngine {
     holdAt(bus.gain, now);
     bus.gain.linearRampToValueAtTime(0.00001, now + 0.008);
     this.chokeHats(now);
+    this.hatOnsets = [];
     setTimeout(() => { tracks.forEach(track => track.disconnect()); bus.disconnect(); }, 1300);
     this.newBus();
   }

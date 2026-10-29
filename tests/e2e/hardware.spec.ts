@@ -171,3 +171,59 @@ test('swing knob pointer matches its readout and stores the 50–75% ratio', asy
   expect(await stored()).toBe(75);
   await expect(knob.locator('.knob-mark text')).toHaveText('三连');
 });
+
+test('circling the knob rim turns it with the hand; dragging up from the centre stays vertical', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  const before = await values(page);
+  const bpm = page.getByRole('slider', { name: 'BPM', exact: true });
+  await bpm.press('Home');
+  const rect = (await bpm.boundingBox())!;
+  const cx = rect.x + rect.width / 2, cy = rect.y + rect.height / 2, r = rect.width / 2;
+  const at = (deg: number) => [cx + Math.sin(deg * Math.PI / 180) * r, cy - Math.cos(deg * Math.PI / 180) * r] as const;
+  // Clockwise from 9 o'clock over the top to 3 o'clock: 180° of a 270° sweep.
+  await page.mouse.move(...at(-90));
+  await page.mouse.down();
+  const seen: number[] = [];
+  for (let deg = -85; deg <= 90; deg += 5) {
+    await page.mouse.move(...at(deg));
+    seen.push(Number(await bpm.getAttribute('aria-valuenow')));
+  }
+  for (let i = 1; i < seen.length; i++) expect(seen[i]).toBeGreaterThanOrEqual(seen[i - 1]);
+  expect(seen.at(-1)!).toBeGreaterThanOrEqual(151);
+  expect(seen.at(-1)!).toBeLessThanOrEqual(155);
+  // And back counter-clockwise.
+  for (let deg = 85; deg >= -90; deg -= 5) await page.mouse.move(...at(deg));
+  await page.mouse.up();
+  expect(Number(await bpm.getAttribute('aria-valuenow'))).toBeLessThanOrEqual(62);
+  expect(await values(page)).toEqual(before);
+});
+
+test('small trackpad wheel deltas accumulate instead of jumping a step per event', async ({ page }) => {
+  await page.goto('/');
+  const bpm = page.getByRole('slider', { name: 'BPM', exact: true });
+  await bpm.hover();
+  for (let i = 0; i < 10; i++) await page.mouse.wheel(0, -4);
+  await expect(bpm).toHaveAttribute('aria-valuenow', '128');
+  for (let i = 0; i < 3; i++) await page.mouse.wheel(0, -4);
+  await expect(bpm).toHaveAttribute('aria-valuenow', '129');
+});
+
+test('a rotary drag that passes through the knob centre re-anchors instead of jumping', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  const bpm = page.getByRole('slider', { name: 'BPM', exact: true });
+  await bpm.press('Home');
+  const rect = (await bpm.boundingBox())!;
+  const cx = rect.x + rect.width / 2, cy = rect.y + rect.height / 2, r = rect.width / 2;
+  await page.mouse.move(cx - r, cy);
+  await page.mouse.down();
+  // Start rotary mode with a tangential move up the left side, then cut straight through the centre.
+  await page.mouse.move(cx - r, cy - 10, { steps: 3 });
+  const beforeCross = Number(await bpm.getAttribute('aria-valuenow'));
+  await page.mouse.move(cx, cy, { steps: 6 });
+  await page.mouse.move(cx + r, cy + 10, { steps: 6 });
+  await page.mouse.up();
+  const after = Number(await bpm.getAttribute('aria-valuenow'));
+  expect(Math.abs(after - beforeCross)).toBeLessThanOrEqual(12);
+});

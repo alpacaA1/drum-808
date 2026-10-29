@@ -14,7 +14,12 @@ export interface KnobOptions {
 /** One control for mouse, touch and keyboard; setValue never emits a change. */
 export class Knob {
   private value: number;
-  private drag?: { pointer: number; y: number; value: number };
+  /**
+   * mode is decided after a few pixels: a tangential move that starts on the outer ring turns the knob
+   * like a real one (pointer angle follows the hand 1:1); anything else is the classic vertical drag.
+   */
+  private drag?: { pointer: number; x: number; y: number; startX: number; startY: number; cx: number; cy: number; radius: number; value: number; mode?: 'rotary' | 'vertical'; lost?: boolean };
+  private wheelDelta = 0;
   private arc: SVGPathElement;
 
   constructor(private element: HTMLElement, private options: KnobOptions) {
@@ -44,16 +49,44 @@ export class Knob {
       if (event.button !== 0 || this.drag) return;
       event.preventDefault();
       element.focus({ preventScroll: true });
-      this.drag = { pointer: event.pointerId, y: event.clientY, value: this.value };
+      const rect = element.getBoundingClientRect();
+      this.drag = { pointer: event.pointerId, x: event.clientX, y: event.clientY, startX: event.clientX, startY: event.clientY, cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2, radius: rect.width / 2, value: this.value };
       element.setPointerCapture(event.pointerId);
       element.classList.add('is-dragging');
     });
     element.addEventListener('pointermove', event => {
       if (!this.drag || this.drag.pointer !== event.pointerId) return;
-      const scale = (options.max - options.min) / 200 * (event.shiftKey ? 0.1 : 1);
-      this.drag.value = this.clamp(this.drag.value + (this.drag.y - event.clientY) * scale);
-      this.drag.y = event.clientY;
-      this.change(this.drag.value);
+      const drag = this.drag;
+      if (!drag.mode) {
+        const mx = event.clientX - drag.startX, my = event.clientY - drag.startY;
+        if (Math.hypot(mx, my) < 4) return;
+        const rx = drag.startX - drag.cx, ry = drag.startY - drag.cy;
+        const distance = Math.hypot(rx, ry);
+        // Radial vs tangential share of the first movement, measured at the press point.
+        const radial = distance ? Math.abs((mx * rx + my * ry) / distance) : Infinity;
+        const tangential = distance ? Math.abs((mx * -ry + my * rx) / distance) : 0;
+        drag.mode = distance >= drag.radius * 0.4 && tangential > radial ? 'rotary' : 'vertical';
+        drag.x = drag.startX; drag.y = drag.startY;
+      }
+      const range = options.max - options.min;
+      const fine = event.shiftKey ? 0.1 : 1;
+      let delta: number;
+      if (drag.mode === 'rotary') {
+        // Angles near the centre are unstable; hold until the pointer is back out.
+        // After crossing it, re-anchor instead of applying the jump across the centre.
+        if (Math.hypot(event.clientX - drag.cx, event.clientY - drag.cy) < drag.radius * 0.25) { drag.lost = true; return; }
+        if (drag.lost) { drag.lost = false; drag.x = event.clientX; drag.y = event.clientY; return; }
+        const angle = (x: number, y: number) => Math.atan2(x - drag.cx, drag.cy - y);
+        let turn = angle(event.clientX, event.clientY) - angle(drag.x, drag.y);
+        if (turn > Math.PI) turn -= 2 * Math.PI;
+        if (turn < -Math.PI) turn += 2 * Math.PI;
+        delta = turn * 180 / Math.PI / 270 * range * fine;
+      } else {
+        delta = (drag.y - event.clientY) * range / 200 * fine;
+      }
+      drag.x = event.clientX; drag.y = event.clientY;
+      drag.value = this.clamp(drag.value + delta);
+      this.change(drag.value);
     });
     const end = (event: PointerEvent) => { if (this.drag?.pointer === event.pointerId) this.endDrag(); };
     element.addEventListener('pointerup', end);
@@ -63,7 +96,14 @@ export class Knob {
     element.addEventListener('wheel', event => {
       if (!event.deltaY) return;
       event.preventDefault();
-      this.change(this.value + (event.deltaY < 0 ? 1 : -1) * options.step);
+      // A mouse notch (or line-mode event) is one step; small trackpad deltas accumulate to ~50 px per step.
+      let steps = 0;
+      if (event.deltaMode !== 0 || Math.abs(event.deltaY) >= 50) { steps = -Math.sign(event.deltaY); this.wheelDelta = 0; }
+      else {
+        this.wheelDelta += event.deltaY;
+        if (Math.abs(this.wheelDelta) >= 50) { steps = -Math.sign(this.wheelDelta); this.wheelDelta -= Math.sign(this.wheelDelta) * 50; }
+      }
+      if (steps) this.change(this.value + steps * options.step);
     }, { passive: false });
     element.addEventListener('dblclick', () => { this.endDrag(); this.change(options.defaultValue); });
     element.addEventListener('keydown', event => {

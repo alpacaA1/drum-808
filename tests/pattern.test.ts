@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PRESETS, clearPattern, createPattern, cycleVelocity, defaultSession, deserialize, loadPreset, serialize, setVelocity, toggleStep } from '../src/sequencer/pattern';
+import { PRESETS, clearPattern, createPattern, cycleVelocity, defaultSession, deserialize, isTripletGrid, loadPreset, resizePattern, serialize, setVelocity, toggleStep } from '../src/sequencer/pattern';
 import { trackLevel } from '../src/audio/engine';
 
 describe('pattern operations and future grids', () => {
@@ -24,7 +24,7 @@ describe('pattern operations and future grids', () => {
     const preset = loadPreset('jazz');
     clearPattern(preset.pattern);
     expect(loadPreset('jazz').pattern.tracks[1].steps).toContain(1);
-    expect(PRESETS).toHaveLength(5);
+    expect(PRESETS).toHaveLength(7);
     for (const preset of PRESETS) expect(preset.pattern.tracks.every(t => t.steps.length === preset.pattern.stepsPerBar)).toBe(true);
   });
 });
@@ -63,5 +63,39 @@ describe('mixer routing', () => {
     expect(trackLevel(mixer, 'SD')).toBe(0.8);
     mixer.SD.mute = true;
     expect(trackLevel(mixer, 'SD')).toBe(0);
+  });
+});
+
+describe('grid resolution', () => {
+  it('re-quantises hits to the nearest position on the new grid', () => {
+    const pattern = createPattern(16);
+    setVelocity(pattern, 'BD', 0, 3); setVelocity(pattern, 'BD', 4, 2); setVelocity(pattern, 'SD', 12, 1);
+    const triplet = resizePattern(pattern, 12);
+    expect(triplet.stepsPerBar).toBe(12);
+    expect(triplet.tracks.find(t => t.id === 'BD')!.steps.slice(0, 4)).toEqual([3, 0, 0, 2]);
+    expect(triplet.tracks.find(t => t.id === 'SD')!.steps[9]).toBe(1);
+    // Beats survive a round trip through any grid.
+    const back = resizePattern(resizePattern(pattern, 24), 16);
+    expect(back.tracks.find(t => t.id === 'BD')!.steps).toEqual(pattern.tracks.find(t => t.id === 'BD')!.steps);
+  });
+
+  it('keeps the louder hit when two steps land on one', () => {
+    // 24→12: steps 1 and 2 both round to step 1.
+    const dense = createPattern(24);
+    setVelocity(dense, 'CH', 1, 1); setVelocity(dense, 'CH', 2, 3);
+    expect(resizePattern(dense, 12).tracks.find(t => t.id === 'CH')!.steps[1]).toBe(3);
+  });
+
+  it('ships triplet presets that load on a 12-step grid and survive serialisation', () => {
+    for (const id of ['jazzride', 'shuffle']) {
+      const preset = loadPreset(id);
+      expect(preset.pattern.stepsPerBar).toBe(12);
+      expect(isTripletGrid(preset.pattern.stepsPerBar)).toBe(true);
+      expect(preset.pattern.tracks.every(t => t.steps.length === 12)).toBe(true);
+      const session = { ...defaultSession(), pattern: preset.pattern, bpm: preset.bpm, swing: preset.swing };
+      expect(deserialize(serialize(session)).pattern).toEqual(preset.pattern);
+    }
+    expect(isTripletGrid(16)).toBe(false);
+    expect(isTripletGrid(24)).toBe(true);
   });
 });

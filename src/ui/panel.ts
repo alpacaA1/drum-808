@@ -1,4 +1,4 @@
-import { PRESETS, TRACKS, defaultSession, type Session, type TrackId, type Velocity } from '../sequencer/pattern';
+import { GRIDS, PRESETS, TRACKS, defaultSession, isTripletGrid, type Session, type TrackId, type Velocity } from '../sequencer/pattern';
 import { Knob, type KnobOptions } from './knob';
 
 /** Swing ratio 50% (straight) … 75% ↔ swing amount 0 … 100%; 66.7% ratio (triplet) is amount 66.7%. */
@@ -14,7 +14,13 @@ export interface PanelActions {
   master: (value: number) => void;
   preset: (id: string) => void;
   clear: () => void;
+  grid: (stepsPerBar: number) => void;
+  play: (id: TrackId, accent: boolean) => void;
+  perform: (key: 'metronome' | 'record', on: boolean) => void;
 }
+
+/** Home-row keys play the tracks in order: A=BD … K=CB. */
+export const PLAY_KEYS: Record<string, TrackId> = { KeyA: 'BD', KeyS: 'SD', KeyD: 'CH', KeyF: 'OH', KeyG: 'CP', KeyH: 'LT', KeyJ: 'RS', KeyK: 'CB' };
 
 const velocityNames = ['关闭', '弱音', '普通', '重音'];
 const toneNames: Partial<Record<TrackId, string>> = { BD: '衰减', SD: '响弦', OH: '衰减' };
@@ -39,15 +45,16 @@ export class Panel {
           </header>
           <div class="workspace">
             <section id="sequencer" class="sequencer grid-card" aria-label="步进音序器" tabindex="-1">
-              <div class="grid-title"><h2 class="section-label">步进音序器</h2><span class="pattern-meta" id="pattern-meta"></span></div>
+              <div class="grid-title"><h2 class="section-label">步进音序器</h2><div class="grid-resolution" role="radiogroup" aria-label="网格">${GRIDS.map(grid => `<button data-grid="${grid.steps}" role="radio" aria-checked="false" title="${grid.name}">${grid.label}<span>${grid.name}</span></button>`).join('')}</div><span class="pattern-meta" id="pattern-meta"></span></div>
               <div class="grid-scroll" tabindex="0" aria-label="鼓机网格，可左右滚动"><div class="step-grid" role="group" aria-label="八轨节奏网格"></div></div>
               <footer class="panel-footer"><div class="audio-status" id="audio-status"><i></i><span id="audio-hint">点击播放或步进键启用声音</span></div><span class="scroll-hint">左右滑动查看步进 →</span></footer>
             </section>
             <aside class="side-panel" aria-label="节奏与声部设置">
               <section class="side-section preset-picker" aria-label="节奏预设"><label class="section-label" for="preset">节奏预设</label><select id="preset"><option value="custom" disabled>自定义节奏</option>${PRESETS.map(p => `<option value="${p.id}">${p.name} · ${p.genre}</option>`).join('')}</select><button id="clear" class="text-button">清空节奏 <span aria-hidden="true">↺</span></button></section>
               <section class="side-section selected-track" id="selected-track" aria-label="所选声部" data-track="BD"><h2 class="section-label">声部</h2><div class="selected-track-heading"><i class="track-dot"></i><span id="selected-track-id"></span><h3 id="selected-track-name"></h3></div><div class="track-knobs"><div class="mixer-control rotary-control"><div id="track-volume"></div><div class="control-readout"><span>音量</span><output id="track-volume-value"></output></div></div><div class="mixer-control rotary-control" id="tone-control"><div id="track-tone"></div><div class="control-readout"><span id="track-tone-label"></span><output id="track-tone-value"></output></div></div></div></section>
+              <section class="side-section perform" aria-label="演奏"><h2 class="section-label">演奏</h2><div class="perform-toggles"><button id="metronome" class="toggle-key" aria-pressed="false"><i class="toggle-led" aria-hidden="true"></i>节拍器</button><button id="record" class="toggle-key record" aria-pressed="false"><i class="toggle-led" aria-hidden="true"></i>录制</button></div><div class="key-map">${Object.entries(PLAY_KEYS).map(([code, id]) => `<span data-key-track="${id}"><kbd>${code.slice(3)}</kbd>${id}</span>`).join('')}</div><p class="perform-hint">按键实时演奏，<kbd>Shift</kbd> 为重音；播放中打开录制，按键会写入最近的步进</p></section>
               <section class="side-section"><h2 class="section-label">力度</h2><div class="velocity-legend"><span><i class="legend-key ghost-key"></i>弱音</span><span><i class="legend-key normal-key"></i>普通</span><span><i class="legend-key accent-key"></i>重音</span></div></section>
-              <section class="side-section shortcuts"><h2 class="section-label">操作</h2><dl><div><dt><kbd>点击</kbd> / <kbd>拖动</kbd></dt><dd>写入步进</dd></div><div><dt><kbd>右键</kbd> / <kbd>⌥ 点击</kbd></dt><dd>切换力度</dd></div><div><dt><kbd>长按</kbd></dt><dd>触屏切换力度</dd></div><div><dt><kbd>声部名称</kbd></dt><dd>选择并试听</dd></div></dl></section>
+              <section class="side-section shortcuts"><h2 class="section-label">操作</h2><dl><div><dt><kbd>点击</kbd> / <kbd>拖动</kbd></dt><dd>写入步进</dd></div><div><dt><kbd>右键</kbd> / <kbd>⌥ 点击</kbd></dt><dd>切换力度</dd></div><div><dt><kbd>长按</kbd></dt><dd>触屏切换力度</dd></div><div><dt><kbd>声部名称</kbd></dt><dd>选择并试听</dd></div><div><dt><kbd>A</kbd>–<kbd>K</kbd></dt><dd>演奏声部</dd></div></dl></section>
               <div class="save-status" id="save-status" role="status">已自动保存</div>
             </aside>
           </div>
@@ -102,8 +109,17 @@ export class Panel {
     this.element('#transport').addEventListener('click', this.actions.transport);
     document.addEventListener('keydown', event => {
       const target = event.target as HTMLElement;
-      if (event.code === 'Space' && !event.repeat && !target.closest('input, select, textarea, [role="slider"], [contenteditable="true"]')) {
+      // IME composition (e.g. pinyin) must never trigger transport or pads.
+      if (event.isComposing || event.keyCode === 229 || target.closest('input, select, textarea, [contenteditable="true"]')) return;
+      if (event.code === 'Space' && !event.repeat && !target.closest('[role="slider"]')) {
         event.preventDefault(); this.actions.transport();
+        return;
+      }
+      const id = PLAY_KEYS[event.code];
+      if (id && !event.repeat && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault();
+        this.actions.play(id, event.shiftKey);
+        this.flashTrack(id);
       }
     });
     this.element<HTMLInputElement>('#bpm-number').addEventListener('change', event => {
@@ -117,6 +133,18 @@ export class Panel {
     });
     this.element<HTMLSelectElement>('#preset').addEventListener('change', event => this.actions.preset((event.target as HTMLSelectElement).value));
     this.element('#clear').addEventListener('click', this.actions.clear);
+    this.element('.grid-resolution').addEventListener('click', event => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-grid]');
+      if (button) this.actions.grid(Number(button.dataset.grid));
+    });
+    for (const key of ['metronome', 'record'] as const) {
+      const button = this.element(`#${key}`);
+      button.addEventListener('click', () => {
+        const on = button.getAttribute('aria-pressed') !== 'true';
+        button.setAttribute('aria-pressed', String(on));
+        this.actions.perform(key, on);
+      });
+    }
     this.element('.step-grid').addEventListener('click', event => {
       const track = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-select-track]');
       if (track) {
@@ -210,7 +238,13 @@ export class Panel {
     this.element('#swing-value').textContent = String(swingAmount(state.swing));
     this.knobs.get('master')!.setValue(state.master * 100);
     this.element('#master-value').textContent = `${Math.round(state.master * 100)}%`;
-    this.element('#pattern-meta').textContent = `${state.pattern.tracks.length} 声部 / ${state.pattern.stepsPerBar} 步 / 4/4`;
+    const grid = GRIDS.find(item => item.steps === state.pattern.stepsPerBar);
+    this.element('#pattern-meta').textContent = `${state.pattern.tracks.length} 声部 / ${state.pattern.stepsPerBar} 步${grid ? ` · ${grid.name}` : ''} / 4/4`;
+    this.root.querySelectorAll<HTMLElement>('[data-grid]').forEach(button => button.setAttribute('aria-checked', String(Number(button.dataset.grid) === state.pattern.stepsPerBar)));
+    // Triplet grids already place notes on the triplet; swing would distort them, so it is bypassed.
+    const swingOff = isTripletGrid(state.pattern.stepsPerBar);
+    this.element('.swing').classList.toggle('is-inactive', swingOff);
+    this.element('.swing').title = swingOff ? '三连音网格自带摇摆，Swing 暂不生效' : '';
     for (const { id } of TRACKS) {
       for (const key of ['mute', 'solo'] as const) this.element(`button[data-id="${id}"][data-mix="${key}"]`).setAttribute('aria-pressed', String(state.mixer[id][key]));
       this.element(`[data-track-panel="${id}"]`).classList.toggle('is-muted', state.mixer[id].mute || (TRACKS.some(t => state.mixer[t.id].solo) && !state.mixer[id].solo));
@@ -238,6 +272,14 @@ export class Panel {
     this.element('#track-tone-label').textContent = toneNames[id] ?? '';
     this.knobs.get('track-volume')!.setLabel(`${track.name}音量`);
     this.knobs.get('track-tone')!.setLabel(`${track.name}${toneNames[id] ?? '音色'}`);
+  }
+
+  private flashTrack(id: TrackId): void {
+    for (const element of this.root.querySelectorAll<HTMLElement>(`[data-track-panel="${id}"], [data-key-track="${id}"]`)) {
+      element.classList.remove('is-hit');
+      void element.offsetWidth; // restart the flash when the same key repeats quickly
+      element.classList.add('is-hit');
+    }
   }
 
   setPreset(id: string): void { this.element<HTMLSelectElement>('#preset').value = id; }

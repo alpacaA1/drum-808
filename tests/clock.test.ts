@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { SequencerClock, startTicker, stepDuration, stepOffset, type StepEvent, type Timing } from '../src/sequencer/clock';
+import { SequencerClock, nearestStep, startTicker, stepDuration, stepOffset, type StepEvent, type Timing } from '../src/sequencer/clock';
 
 describe('swing math', () => {
   it('delays odd steps only and preserves even step onsets', () => {
@@ -65,12 +65,14 @@ describe('audio clock with a fake currentTime', () => {
     const afterStall = events.slice(before);
     expect(afterStall.length).toBeLessThanOrEqual(2);
     afterStall.forEach(event => expect(event.audioTime).toBeGreaterThanOrEqual(now));
+    // Serials keep counting over the skipped steps, so a pending skip for a skipped step can expire.
+    expect(afterStall[0].serial).toBeGreaterThan(events[before - 1].serial + 1000);
     clock.stop();
     const stopped = events.length;
     now += 10; clock.tick();
     expect(events).toHaveLength(stopped);
     clock.start();
-    expect(events[stopped]).toEqual({ stepIndex: 0, audioTime: now + 0.025 });
+    expect(events[stopped]).toEqual({ stepIndex: 0, audioTime: now + 0.025, serial: 0 });
   });
   it('falls back to timeout when Worker construction is unavailable', () => {
     vi.useFakeTimers();
@@ -81,5 +83,56 @@ describe('audio clock with a fake currentTime', () => {
     stop(); vi.advanceTimersByTime(100);
     expect(tick).toHaveBeenCalledTimes(5);
     vi.useRealTimers();
+  });
+});
+
+describe('live-hit quantisation', () => {
+  const slow = { bpm: 60, swing: 50, stepsPerBar: 12 };
+  it('considers the clock\'s next step even when it is beyond the lookahead window', () => {
+    // Step 1 is at 0.025 + 1/3 s; a hit at 0.2 s is closer to it than to step 0.
+    const next = { stepIndex: 1, audioTime: 0.025 + 1 / 3, serial: 1 };
+    expect(nearestStep([{ stepIndex: 0, audioTime: 0.025, serial: 0 }], next, 0.2)).toMatchObject({ stepIndex: 1, serial: 1, scheduled: false });
+  });
+  it('wraps to the next bar', () => {
+    const last = { stepIndex: 11, audioTime: 0.025 + 11 / 3, serial: 11 };
+    const next = { stepIndex: 0, audioTime: 4.025, serial: 12 };
+    expect(nearestStep([last], next, 3.88)).toMatchObject({ stepIndex: 0, serial: 12, scheduled: false });
+  });
+  it('keeps an already scheduled step when it is closer, honouring swing', () => {
+    const swung = { bpm: 120, swing: 75, stepsPerBar: 16 };
+    const events = [{ stepIndex: 0, audioTime: 1, serial: 0 }, { stepIndex: 1, audioTime: 1 + stepDuration(0, swung), serial: 1 }];
+    expect(nearestStep(events, undefined, 1.02)).toMatchObject({ stepIndex: 0, scheduled: true });
+    expect(nearestStep([], undefined, 1)).toBeUndefined();
+  });
+  it('peekNext predicts exactly what the clock schedules next, including a BPM change before the tick', () => {
+    let now = 0;
+    const timing = { ...slow };
+    const events: StepEvent[] = [];
+    const clock = new SequencerClock(() => now, () => timing, event => events.push(event));
+    expect(clock.peekNext()).toBeUndefined();
+    clock.start();
+    now = 0.24; clock.tick();
+    timing.bpm = 200; // changed between ticks: the clock clamps the retimed boundary to now + 5 ms
+    const predicted = clock.peekNext()!;
+    expect(predicted.audioTime).toBeCloseTo(0.245);
+    clock.tick(); // same instant → identical result
+    expect(events.find(event => event.serial === predicted.serial)).toEqual(predicted);
+    // And a slow-down keeps the same serial for the same step, only later.
+    timing.bpm = 80;
+    const slower = clock.peekNext()!;
+    now = slower.audioTime - 0.05; clock.tick();
+    expect(events.find(event => event.serial === slower.serial)!.audioTime).toBeCloseTo(slower.audioTime);
+  });
+  it('peekNext applies the stall fast-forward exactly like tick', () => {
+    let now = 0;
+    const timing = { ...slow };
+    const events: StepEvent[] = [];
+    const clock = new SequencerClock(() => now, () => timing, event => events.push(event));
+    clock.start();
+    now = 1.0; // the timer stalled; steps 1 and 2 are already in the past
+    const predicted = clock.peekNext()!;
+    clock.tick();
+    expect(events.find(event => event.serial === predicted.serial)).toEqual(predicted);
+    expect(predicted.audioTime).toBeGreaterThanOrEqual(now);
   });
 });
